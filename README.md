@@ -41,7 +41,7 @@ jsonLogic(
 In an infix language (like Python) this could be written as:
 
 ```python
-( (3 > 1) and (1 < 3) )
+var = ((3 > 1) and (1 < 3))
 ```
     
 ### Data-Driven
@@ -95,11 +95,11 @@ Sometimes the rule you want to process is "Always" or "Never."  If the first par
 
 ```python
 #Always
-jsonLogic(True, data_will_be_ignored);
+jsonLogic(True, data_will_be_ignored)
 # True
 
 #Never
-jsonLogic(False, i_wasnt_even_supposed_to_be_here);
+jsonLogic(False, i_wasnt_even_supposed_to_be_here)
 # False
 ```
 
@@ -108,11 +108,5 @@ jsonLogic(False, i_wasnt_even_supposed_to_be_here);
 The best way to install this library is via [PIP](https://pypi.python.org/pypi/):
 
 ```bash
-pip install json-logic
-```
-
-If that doesn't suit you, and you want to manage updates yourself, the entire library is self-contained in `json_logic.py` and you can download it straight into your project as you see fit.
-
-```bash
-curl -O https://raw.githubusercontent.com/nadirizr/json-logic-py/master/json_logic.py
+pip install json-logic-modernized
 ```

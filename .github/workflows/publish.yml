@@ -70,5 +70,3 @@ jobs:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
 
-      # Note: keep both publish steps here; push to 'test' will publish to
-      # TestPyPI and push to 'main' will publish to PyPI once tests pass.
