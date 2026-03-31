@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "json-logic-py"
+name = "json-logic-modernized"
 version = "1.0.0"
 description = "Build complex rules, serialize them as JSON, and execute them in Python"
 readme = "README.md"
