@@ -1,147 +1,192 @@
-# This is a Python implementation of the following jsonLogic JS library:
-# https://github.com/jwadhams/json-logic-js
-from __future__ import unicode_literals
+"""
+json-logic-py
+~~~~~~~~~~~~~
 
-import sys
-from six.moves import reduce
+A Python implementation of the JsonLogic rule engine.
+See https://jsonlogic.com for the specification.
+"""
+
+from __future__ import annotations
+
 import logging
+from typing import Any
+
+__all__ = ["jsonLogic", "operations"]
+__version__ = "1.0.0"
 
 logger = logging.getLogger(__name__)
 
-try:
-    unicode
-except NameError:
-    pass
-else:
-    # Python 2 fallback.
-    str = unicode
+# ---------------------------------------------------------------------------
+# Type aliases
+# ---------------------------------------------------------------------------
+
+Data = dict[str, Any] | list[Any] | None
+Rule = dict[str, Any] | list[Any] | str | int | float | bool | None
 
 
-def if_(*args):
-    """Implements the 'if' operator with support for multiple elseif-s."""
+# ---------------------------------------------------------------------------
+# Operator helpers
+# ---------------------------------------------------------------------------
+
+
+def if_(*args: Any) -> Any:
+    """Implement the ``if`` operator with support for multiple elseif branches."""
     for i in range(0, len(args) - 1, 2):
         if args[i]:
             return args[i + 1]
     if len(args) % 2:
         return args[-1]
-    else:
-        return None
+    return None
 
 
-def soft_equals(a, b):
-    """Implements the '==' operator, which does type JS-style coertion."""
+def soft_equals(a: Any, b: Any) -> bool:
+    """Implement ``==`` with JS-style type coercion."""
     if isinstance(a, str) or isinstance(b, str):
         return str(a) == str(b)
     if isinstance(a, bool) or isinstance(b, bool):
         return bool(a) is bool(b)
-    return a == b
+    return a == b  # type: ignore[no-any-return]
 
 
-def hard_equals(a, b):
-    """Implements the '===' operator."""
-    if type(a) != type(b):
+def hard_equals(a: Any, b: Any) -> bool:
+    """Implement ``===`` (strict equality, no coercion)."""
+    if type(a) is not type(b):
         return False
-    return a == b
+    return a == b  # type: ignore[no-any-return]
 
 
-def less(a, b, *args):
-    """Implements the '<' operator with JS-style type coertion."""
-    types = set([type(a), type(b)])
-    if float in types or int in types:
+def less(a: Any, b: Any, *args: Any) -> bool:
+    """Implement ``<`` with JS-style numeric coercion and optional between-form."""
+    if {type(a), type(b)} & {float, int}:
         try:
             a, b = float(a), float(b)
-        except TypeError:
-            # NaN
-            return False
+        except (TypeError, ValueError):
+            return False  # NaN-like behaviour
     return a < b and (not args or less(b, *args))
 
 
-def less_or_equal(a, b, *args):
-    """Implements the '<=' operator with JS-style type coertion."""
-    return (
-        less(a, b) or soft_equals(a, b)
-    ) and (not args or less_or_equal(b, *args))
+def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
+    """Implement ``<=`` with JS-style numeric coercion and optional between-form."""
+    return (less(a, b) or soft_equals(a, b)) and (not args or less_or_equal(b, *args))
 
 
-def to_numeric(arg):
-    """
-    Converts a string either to int or to float.
-    This is important, because e.g. {"!==": [{"+": "0"}, 0.0]}
+def to_numeric(arg: Any) -> int | float:
+    """Convert *arg* to ``int`` or ``float``, preserving the distinction.
+
+    ``"0"`` → ``0`` (int), ``"1.5"`` → ``1.5`` (float), numbers pass through.
+    This mirrors JS unary ``+`` coercion used by the ``+`` operator.
     """
     if isinstance(arg, str):
-        if '.' in arg:
-            return float(arg)
-        else:
+        try:
             return int(arg)
-    return arg
+        except ValueError:
+            return float(arg)
+    if isinstance(arg, (int, float)):
+        return arg
+    return int(arg)
 
-def plus(*args):
-    """Sum converts either to ints or to floats."""
-    return sum(to_numeric(arg) for arg in args)
+
+def plus(*args: Any) -> int | float:
+    """Sum all arguments, converting strings to numbers first."""
+    result: int | float = 0
+    for arg in args:
+        result = result + to_numeric(arg)
+    return result
 
 
-def minus(*args):
-    """Also, converts either to ints or to floats."""
+def minus(*args: Any) -> int | float:
+    """Subtract or negate, converting strings to numbers first."""
     if len(args) == 1:
         return -to_numeric(args[0])
     return to_numeric(args[0]) - to_numeric(args[1])
 
 
-def merge(*args):
-    """Implements the 'merge' operator for merging lists."""
-    ret = []
+def multiply(*args: Any) -> float:
+    """Multiply all arguments together, converting to float first."""
+    result = 1.0
     for arg in args:
-        if isinstance(arg, list) or isinstance(arg, tuple):
-            ret += list(arg)
+        result *= float(arg)
+    return result
+
+
+def merge(*args: Any) -> list[Any]:
+    """Merge one or more lists (or scalars) into a single flat list."""
+    result: list[Any] = []
+    for arg in args:
+        if isinstance(arg, (list, tuple)):
+            result.extend(arg)
         else:
-            ret.append(arg)
-    return ret
+            result.append(arg)
+    return result
 
 
-def get_var(data, var_name, not_found=None):
-    """Gets variable value from data dictionary."""
+def get_var(data: Any, var_name: Any = None, not_found: Any = None) -> Any:
+    """Retrieve a value from *data* using dot-notation *var_name*.
+
+    An empty string or ``None`` *var_name* returns the whole data object.
+    """
+    if var_name is None or var_name == "" or var_name == []:
+        return data
     try:
-        for key in str(var_name).split('.'):
+        for key in str(var_name).split("."):
             try:
                 data = data[key]
             except TypeError:
                 data = data[int(key)]
     except (KeyError, TypeError, ValueError):
         return not_found
-    else:
-        return data
+    return data
 
 
-def missing(data, *args):
-    """Implements the missing operator for finding missing variables."""
-    not_found = object()
-    if args and isinstance(args[0], list):
-        args = args[0]
-    ret = []
-    for arg in args:
-        if get_var(data, arg, not_found) is not_found:
-            ret.append(arg)
-    return ret
+def missing(data: Any, *args: Any) -> list[Any]:
+    """Return a list of keys from *args* that are absent in *data*."""
+    sentinel = object()
+    keys = args[0] if args and isinstance(args[0], list) else args
+    return [key for key in keys if get_var(data, key, sentinel) is sentinel]
 
 
-def missing_some(data, min_required, args):
-    """Implements the missing_some operator for finding missing variables."""
+def missing_some(data: Any, min_required: int, args: list[Any]) -> list[Any]:
+    """Return missing keys when fewer than *min_required* of *args* are present."""
     if min_required < 1:
         return []
+    sentinel = object()
     found = 0
-    not_found = object()
-    ret = []
+    absent: list[Any] = []
     for arg in args:
-        if get_var(data, arg, not_found) is not_found:
-            ret.append(arg)
+        if get_var(data, arg, sentinel) is sentinel:
+            absent.append(arg)
         else:
             found += 1
             if found >= min_required:
                 return []
-    return ret
+    return absent
 
 
-operations = {
+def substr(source: Any, start: Any, length: Any = None) -> str:
+    """Implement ``substr`` matching JS String.prototype.substr semantics."""
+    src: str = str(source)
+    s: int = int(start)
+    if s < 0:
+        s = max(len(src) + s, 0)
+    if length is None:
+        return src[s:]
+    n: int = int(length)
+    if n < 0:
+        return src[s : len(src) + n]
+    return src[s : s + n]
+
+
+def _log_and_return(a: Any) -> Any:
+    """Log *a* at INFO level and return it unchanged."""
+    logger.info(a)
+    return a
+
+
+# ---------------------------------------------------------------------------
+# Operations registry
+# ---------------------------------------------------------------------------
+
+operations: dict[str, Any] = {
     "==": soft_equals,
     "===": hard_equals,
     "!=": lambda a, b: not soft_equals(a, b),
@@ -153,51 +198,105 @@ operations = {
     "!": lambda a: not a,
     "!!": bool,
     "%": lambda a, b: a % b,
-    "and": lambda *args: reduce(lambda total, arg: total and arg, args, True),
-    "or": lambda *args: reduce(lambda total, arg: total or arg, args, False),
+    "and": lambda *args: next((a for a in args if not a), args[-1] if args else True),
+    "or": lambda *args: next((a for a in args if a), args[-1] if args else False),
     "?:": lambda a, b, c: b if a else c,
     "if": if_,
-    "log": lambda a: logger.info(a) or a,
-    "in": lambda a, b: a in b if "__contains__" in dir(b) else False,
+    "log": _log_and_return,
+    "in": lambda a, b: a in b if hasattr(b, "__contains__") else False,
     "cat": lambda *args: "".join(str(arg) for arg in args),
     "+": plus,
-    "*": lambda *args: reduce(lambda total, arg: total * float(arg), args, 1),
+    "*": multiply,
     "-": minus,
     "/": lambda a, b=None: a if b is None else float(a) / float(b),
     "min": lambda *args: min(args),
     "max": lambda *args: max(args),
     "merge": merge,
-    "count": lambda *args: sum(1 if a else 0 for a in args),
+    "count": lambda *args: sum(1 for a in args if a),
+    "substr": substr,
 }
 
 
-def jsonLogic(tests, data=None):
-    """Executes the json-logic with given data."""
-    # You've recursed to a primitive, stop!
-    if tests is None or not isinstance(tests, dict):
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
+def jsonLogic(tests: Rule, data: Data = None) -> Any:  # noqa: N802
+    """
+    Evaluate *tests* (a JsonLogic rule) against *data*.
+
+    Parameters
+    ----------
+    tests:
+        A JsonLogic rule encoded as a Python object (usually a ``dict``).
+    data:
+        The data context to evaluate the rule against.
+
+    Returns
+    -------
+    Any
+        The result of evaluating the rule.
+    """
+    # Primitive value – return as-is
+    if tests is None or not isinstance(tests, (dict, list)):
         return tests
+
+    # A plain list: evaluate each element and return the resulting list
+    if isinstance(tests, list):
+        return [jsonLogic(item, data) for item in tests]
 
     data = data or {}
 
-    operator = list(tests.keys())[0]
-    values = tests[operator]
+    operator = next(iter(tests))
+    values: Any = tests[operator]
 
-    # Easy syntax for unary operators, like {"var": "x"} instead of strict
-    # {"var": ["x"]}
-    if not isinstance(values, list) and not isinstance(values, tuple):
+    # Unary sugar: {"var": "x"} instead of {"var": ["x"]}
+    if not isinstance(values, (list, tuple)):
         values = [values]
 
-    # Recursion!
-    values = [jsonLogic(val, data) for val in values]
+    # Special operators whose arguments must NOT be pre-evaluated
+    match operator:
+        case "var":
+            return get_var(data, *[jsonLogic(v, data) for v in values])
+        case "missing":
+            return missing(data, *[jsonLogic(v, data) for v in values])
+        case "missing_some":
+            return missing_some(data, *[jsonLogic(v, data) for v in values])
+        case "filter":
+            arr = jsonLogic(values[0], data)
+            sub_rule = values[1]
+            return [item for item in (arr or []) if jsonLogic(sub_rule, item)]
+        case "map":
+            arr = jsonLogic(values[0], data)
+            sub_rule = values[1]
+            return [jsonLogic(sub_rule, item) for item in (arr or [])]
+        case "reduce":
+            arr = jsonLogic(values[0], data)
+            sub_rule = values[1]
+            initial = jsonLogic(values[2], data) if len(values) > 2 else None
+            result = initial
+            for item in (arr or []):
+                result = jsonLogic(sub_rule, {"current": item, "accumulator": result})
+            return result
+        case "all":
+            arr = jsonLogic(values[0], data)
+            sub_rule = values[1]
+            return bool(arr) and all(jsonLogic(sub_rule, item) for item in arr)
+        case "none":
+            arr = jsonLogic(values[0], data)
+            sub_rule = values[1]
+            return not any(jsonLogic(sub_rule, item) for item in (arr or []))
+        case "some":
+            arr = jsonLogic(values[0], data)
+            sub_rule = values[1]
+            return any(jsonLogic(sub_rule, item) for item in (arr or []))
 
-    if operator == 'var':
-        return get_var(data, *values)
-    if operator == 'missing':
-        return missing(data, *values)
-    if operator == 'missing_some':
-        return missing_some(data, *values)
+    # Recursively evaluate all child rules before passing to the operator
+    evaluated = [jsonLogic(v, data) for v in values]
 
     if operator not in operations:
-        raise ValueError("Unrecognized operation %s" % operator)
+        raise ValueError(f"Unrecognized operation: {operator!r}")
 
-    return operations[operator](*values)
+    return operations[operator](*evaluated)
+
