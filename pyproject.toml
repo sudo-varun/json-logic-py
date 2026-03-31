@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "json-logic-modernized"
-version = "1.0.0"
+version = "1.0.1"
 description = "Build complex rules, serialize them as JSON, and execute them in Python"
 readme = "README.md"
 license = { text = "MIT" }
